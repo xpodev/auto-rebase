@@ -1,0 +1,23 @@
+{
+  "name": "auto-rebase-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@octokit/auth-app": "^7.1.0",
+    "@octokit/rest": "^21.0.2",
+    "better-sqlite3": "^11.3.0",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.4",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}
