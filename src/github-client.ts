@@ -5,7 +5,7 @@ export interface RawPR {
   number: number;
   head: { ref: string; sha: string };
   base: { ref: string };
-  draft: boolean | null;
+  draft?: boolean | null;
   auto_merge: unknown | null;
   created_at: string;
 }

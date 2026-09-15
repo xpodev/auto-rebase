@@ -1,0 +1,39 @@
+# auto-rebase-bot
+
+Polls a single GitHub repo and, each time a PR merges into the base branch,
+rebases exactly one other open PR — the highest-priority eligible one — onto
+the new base. Priority: PRs with auto-merge enabled first, then oldest first.
+Draft PRs are never touched. Conflicts are skipped (with a PR comment) rather
+than blocking the rest of the queue.
+
+See `docs/superpowers/specs/2026-09-15-auto-rebase-bot-design.md` for the full
+design.
+
+## Setup
+
+1. Create a GitHub App on the target repo with permissions: `Pull requests:
+   Read & write`, `Contents: Read & write`, `Commit statuses: Read` (if
+   branch protection requires status checks to re-run, no extra permission is
+   needed — pushes trigger CI normally).
+2. Install the app on the repo and note the installation ID.
+3. Set environment variables:
+
+   | Variable                     | Required | Default          |
+   |-------------------------------|----------|------------------|
+   | `GITHUB_APP_ID`               | yes      | —                |
+   | `GITHUB_APP_PRIVATE_KEY`      | yes      | —                |
+   | `GITHUB_APP_INSTALLATION_ID`  | yes      | —                |
+   | `GITHUB_REPO`                 | yes      | — (`owner/repo`) |
+   | `BASE_BRANCH`                 | no       | `main`           |
+   | `POLL_INTERVAL_MS`            | no       | `60000`          |
+   | `GIT_WORKDIR`                 | no       | `.git-workdir`   |
+   | `DB_PATH`                     | no       | `./pr-queue.db`  |
+
+4. `npm install && npm run build && npm start`
+
+## Development
+
+- `npm test` — unit + local-git integration tests (no network required).
+- Manual end-to-end verification against a real repo/App installation is a
+  separate manual runbook, not part of automated CI (see spec's Testing
+  Strategy section).
