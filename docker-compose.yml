@@ -1,0 +1,11 @@
+services:
+  auto-rebase:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - auto-rebase-data:/data
+    restart: unless-stopped
+
+volumes:
+  auto-rebase-data:

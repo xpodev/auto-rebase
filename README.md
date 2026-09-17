@@ -31,6 +31,16 @@ design.
 
 4. `npm install && npm run build && npm start`
 
+## Docker
+
+1. `cp .env.example .env` and fill in the required variables (the private
+   key must keep its real line breaks — see the comment in
+   `.env.example`).
+2. `docker compose up --build`
+
+State (`GIT_WORKDIR`, `DB_PATH`) is persisted in the `auto-rebase-data`
+named volume, mounted at `/data`.
+
 ## Development
 
 - `npm test` — unit + local-git integration tests (no network required).
