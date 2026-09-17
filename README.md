@@ -2,9 +2,10 @@
 
 Polls a single GitHub repo and, each time a PR merges into the base branch,
 rebases exactly one other open PR — the highest-priority eligible one — onto
-the new base. Priority: PRs with auto-merge enabled first, then oldest first.
-Draft PRs are never touched. Conflicts are skipped (with a PR comment) rather
-than blocking the rest of the queue.
+the new base. Priority tiers, each oldest-first within the tier: (1) auto-merge
+enabled and approved, (2) auto-merge enabled only, (3) approved only, (4)
+neither. Draft PRs are never touched. Conflicts are skipped (with a PR
+comment) rather than blocking the rest of the queue.
 
 See `docs/superpowers/specs/2026-09-15-auto-rebase-bot-design.md` for the full
 design.

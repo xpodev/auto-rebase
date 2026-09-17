@@ -10,6 +10,12 @@ export interface RawPR {
   created_at: string;
 }
 
+export interface ReviewDecisionSearchResult {
+  search: {
+    nodes: Array<{ number?: number; reviewDecision?: string | null }>;
+  };
+}
+
 export interface OctokitLike {
   rest: {
     pulls: {
@@ -36,6 +42,7 @@ export interface OctokitLike {
       }) => Promise<unknown>;
     };
   };
+  graphql: (query: string, variables?: Record<string, unknown>) => Promise<ReviewDecisionSearchResult>;
 }
 
 export interface GitHubClient {
@@ -44,7 +51,7 @@ export interface GitHubClient {
   commentOnPR(number: number, body: string): Promise<void>;
 }
 
-export function mapPullRequest(raw: RawPR): PRRecord {
+export function mapPullRequest(raw: RawPR, approved = false): PRRecord {
   return {
     number: raw.number,
     headRef: raw.head.ref,
@@ -52,15 +59,48 @@ export function mapPullRequest(raw: RawPR): PRRecord {
     baseRef: raw.base.ref,
     isDraft: raw.draft === true,
     autoMergeEnabled: raw.auto_merge != null,
+    approved,
     createdAt: raw.created_at,
   };
+}
+
+const REVIEW_DECISION_QUERY = `
+  query($searchQuery: String!) {
+    search(query: $searchQuery, type: ISSUE, first: 100) {
+      nodes {
+        ... on PullRequest {
+          number
+          reviewDecision
+        }
+      }
+    }
+  }
+`;
+
+async function fetchApprovedPRNumbers(
+  octokit: OctokitLike,
+  owner: string,
+  repo: string
+): Promise<Set<number>> {
+  const result = await octokit.graphql(REVIEW_DECISION_QUERY, {
+    searchQuery: `repo:${owner}/${repo} is:pr is:open`,
+  });
+
+  const approved = new Set<number>();
+  for (const node of result.search.nodes) {
+    if (node.number != null && node.reviewDecision === 'APPROVED') {
+      approved.add(node.number);
+    }
+  }
+  return approved;
 }
 
 export function createGitHubClient(owner: string, repo: string, octokit: OctokitLike): GitHubClient {
   return {
     async listOpenPRs(): Promise<PRRecord[]> {
       const { data } = await octokit.rest.pulls.list({ owner, repo, state: 'open', per_page: 100 });
-      return data.map(mapPullRequest);
+      const approvedNumbers = await fetchApprovedPRNumbers(octokit, owner, repo);
+      return data.map((raw) => mapPullRequest(raw, approvedNumbers.has(raw.number)));
     },
 
     async getBaseBranchHeadSha(branch: string): Promise<string> {

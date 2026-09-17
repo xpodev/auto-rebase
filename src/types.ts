@@ -5,6 +5,7 @@ export interface PRRecord {
   baseRef: string;
   isDraft: boolean;
   autoMergeEnabled: boolean;
+  approved: boolean;
   createdAt: string; // ISO 8601
 }
 

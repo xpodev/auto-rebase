@@ -19,8 +19,25 @@ describe('mapPullRequest', () => {
       baseRef: 'main',
       isDraft: false,
       autoMergeEnabled: false,
+      approved: false,
       createdAt: '2026-02-01T12:00:00Z',
     });
+  });
+
+  it('sets approved from the given flag', () => {
+    const record = mapPullRequest(
+      {
+        number: 42,
+        head: { ref: 'feature-x', sha: 'deadbeef' },
+        base: { ref: 'main' },
+        draft: false,
+        auto_merge: null,
+        created_at: '2026-02-01T12:00:00Z',
+      },
+      true
+    );
+
+    expect(record.approved).toBe(true);
   });
 
   it('treats a non-null auto_merge as enabled, and null draft as false', () => {
@@ -38,7 +55,10 @@ describe('mapPullRequest', () => {
   });
 });
 
-function fakeOctokit(overrides: Partial<OctokitLike['rest']> = {}): OctokitLike {
+function fakeOctokit(
+  overrides: Partial<OctokitLike['rest']> = {},
+  graphql: OctokitLike['graphql'] = vi.fn().mockResolvedValue({ search: { nodes: [] } })
+): OctokitLike {
   return {
     rest: {
       pulls: {
@@ -52,6 +72,7 @@ function fakeOctokit(overrides: Partial<OctokitLike['rest']> = {}): OctokitLike 
       },
       ...overrides,
     },
+    graphql,
   } as unknown as OctokitLike;
 }
 
@@ -84,6 +105,53 @@ describe('GitHubClient', () => {
       repo: 'widgets',
       state: 'open',
       per_page: 100,
+    });
+  });
+
+  it('listOpenPRs marks PRs approved based on the batched GraphQL review decision', async () => {
+    const graphql = vi.fn().mockResolvedValue({
+      search: {
+        nodes: [
+          { number: 1, reviewDecision: 'APPROVED' },
+          { number: 2, reviewDecision: 'REVIEW_REQUIRED' },
+        ],
+      },
+    });
+    const octokit = fakeOctokit(
+      {
+        pulls: {
+          list: vi.fn().mockResolvedValue({
+            data: [
+              {
+                number: 1,
+                head: { ref: 'a', sha: 'sha-a' },
+                base: { ref: 'main' },
+                draft: false,
+                auto_merge: null,
+                created_at: '2026-01-01T00:00:00Z',
+              },
+              {
+                number: 2,
+                head: { ref: 'b', sha: 'sha-b' },
+                base: { ref: 'main' },
+                draft: false,
+                auto_merge: null,
+                created_at: '2026-01-01T00:00:00Z',
+              },
+            ],
+          }),
+        },
+      } as any,
+      graphql
+    );
+
+    const client = createGitHubClient('acme', 'widgets', octokit);
+    const prs = await client.listOpenPRs();
+
+    expect(prs.find((pr) => pr.number === 1)?.approved).toBe(true);
+    expect(prs.find((pr) => pr.number === 2)?.approved).toBe(false);
+    expect(graphql).toHaveBeenCalledWith(expect.any(String), {
+      searchQuery: 'repo:acme/widgets is:pr is:open',
     });
   });
 

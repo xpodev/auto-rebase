@@ -19,6 +19,7 @@ interface PRRowSql {
   base_ref: string;
   is_draft: number;
   auto_merge_enabled: number;
+  approved: number;
   created_at: string;
   status: PRStatus;
   updated_at: string;
@@ -32,6 +33,7 @@ function toPRRow(row: PRRowSql): PRRow {
     baseRef: row.base_ref,
     isDraft: row.is_draft === 1,
     autoMergeEnabled: row.auto_merge_enabled === 1,
+    approved: row.approved === 1,
     createdAt: row.created_at,
     status: row.status,
     updatedAt: row.updated_at,
@@ -50,6 +52,7 @@ export function createStore(dbPath: string, baseBranch: string): Store {
       base_ref            TEXT NOT NULL,
       is_draft            INTEGER NOT NULL,
       auto_merge_enabled  INTEGER NOT NULL,
+      approved            INTEGER NOT NULL DEFAULT 0,
       created_at          TEXT NOT NULL,
       status              TEXT NOT NULL,
       updated_at          TEXT NOT NULL
@@ -62,6 +65,11 @@ export function createStore(dbPath: string, baseBranch: string): Store {
     );
   `);
 
+  const existingColumns = db.prepare(`PRAGMA table_info(pr_queue)`).all() as Array<{ name: string }>;
+  if (!existingColumns.some((column) => column.name === 'approved')) {
+    db.exec(`ALTER TABLE pr_queue ADD COLUMN approved INTEGER NOT NULL DEFAULT 0`);
+  }
+
   db.prepare(
     `INSERT OR IGNORE INTO repo_state (id, base_branch, last_processed_base_sha) VALUES (1, ?, NULL)`
   ).run(baseBranch);
@@ -70,14 +78,15 @@ export function createStore(dbPath: string, baseBranch: string): Store {
     `SELECT status, head_sha FROM pr_queue WHERE number = ?`
   );
   const insertOrReplace = db.prepare(`
-    INSERT INTO pr_queue (number, head_ref, head_sha, base_ref, is_draft, auto_merge_enabled, created_at, status, updated_at)
-    VALUES (@number, @headRef, @headSha, @baseRef, @isDraft, @autoMergeEnabled, @createdAt, @status, @updatedAt)
+    INSERT INTO pr_queue (number, head_ref, head_sha, base_ref, is_draft, auto_merge_enabled, approved, created_at, status, updated_at)
+    VALUES (@number, @headRef, @headSha, @baseRef, @isDraft, @autoMergeEnabled, @approved, @createdAt, @status, @updatedAt)
     ON CONFLICT(number) DO UPDATE SET
       head_ref = excluded.head_ref,
       head_sha = excluded.head_sha,
       base_ref = excluded.base_ref,
       is_draft = excluded.is_draft,
       auto_merge_enabled = excluded.auto_merge_enabled,
+      approved = excluded.approved,
       created_at = excluded.created_at,
       status = excluded.status,
       updated_at = excluded.updated_at
@@ -101,6 +110,7 @@ export function createStore(dbPath: string, baseBranch: string): Store {
         baseRef: pr.baseRef,
         isDraft: pr.isDraft ? 1 : 0,
         autoMergeEnabled: pr.autoMergeEnabled ? 1 : 0,
+        approved: pr.approved ? 1 : 0,
         createdAt: pr.createdAt,
         status,
         updatedAt: new Date().toISOString(),
@@ -124,7 +134,14 @@ export function createStore(dbPath: string, baseBranch: string): Store {
       const rows = db
         .prepare(
           `SELECT * FROM pr_queue WHERE status = 'queued' AND is_draft = 0
-           ORDER BY auto_merge_enabled DESC, created_at ASC`
+           ORDER BY
+             CASE
+               WHEN auto_merge_enabled = 1 AND approved = 1 THEN 0
+               WHEN auto_merge_enabled = 1 THEN 1
+               WHEN approved = 1 THEN 2
+               ELSE 3
+             END ASC,
+             created_at ASC`
         )
         .all() as PRRowSql[];
       return rows.map(toPRRow);
