@@ -31,13 +31,25 @@ export async function runSchedulerTick(
     if (result.outcome === 'success') {
       store.setStatus(candidate.number, 'queued');
       store.setLastProcessedBaseSha(currentBaseSha);
+      console.log(
+        `[auto-rebase] PR #${candidate.number} (${candidate.headRef}) rebased successfully onto ${baseBranch}@${currentBaseSha}`
+      );
       return { attempted: true };
     }
 
     if (result.outcome === 'conflict') {
       store.setStatus(candidate.number, 'conflicted');
       await client.commentOnPR(candidate.number, buildConflictComment(candidate.baseRef));
+      console.log(
+        `[auto-rebase] PR #${candidate.number} (${candidate.headRef}) had a conflict rebasing onto ${baseBranch}, skipped`
+      );
       continue;
+    }
+
+    if (result.outcome === 'transient-failure') {
+      console.log(
+        `[auto-rebase] PR #${candidate.number} (${candidate.headRef}) rebase failed transiently, will retry next tick: ${result.error}`
+      );
     }
 
     store.setStatus(candidate.number, 'queued');
