@@ -15,6 +15,7 @@ function pr(overrides: Partial<PRRecord>): PRRecord {
     isDraft: false,
     autoMergeEnabled: false,
     approved: false,
+    ciStatus: 'pending',
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
   };
@@ -63,6 +64,21 @@ describe('Store', () => {
   it('excludes draft PRs from listQueued', () => {
     store.upsertPR(pr({ number: 1, isDraft: true }));
     expect(store.listQueued()).toHaveLength(0);
+  });
+
+  it('excludes PRs with failing CI from listQueued', () => {
+    store.upsertPR(pr({ number: 1, ciStatus: 'failing' }));
+    expect(store.listQueued()).toHaveLength(0);
+  });
+
+  it('prioritizes passing CI ahead of pending CI regardless of approval tier', () => {
+    store.upsertPR(
+      pr({ number: 1, createdAt: '2026-01-01T00:00:00Z', autoMergeEnabled: true, approved: true, ciStatus: 'pending' })
+    );
+    store.upsertPR(pr({ number: 2, createdAt: '2026-01-02T00:00:00Z', ciStatus: 'passing' }));
+
+    const order = store.listQueued().map((row) => row.number);
+    expect(order).toEqual([2, 1]);
   });
 
   it('excludes conflicted PRs from listQueued', () => {
@@ -142,10 +158,12 @@ describe('Store', () => {
       const queued = migratedStore.listQueued();
       expect(queued).toHaveLength(1);
       expect(queued[0].approved).toBe(false);
+      expect(queued[0].ciStatus).toBe('pending');
 
-      migratedStore.upsertPR(pr({ number: 2, approved: true }));
+      migratedStore.upsertPR(pr({ number: 2, approved: true, ciStatus: 'passing' }));
       const afterUpsert = migratedStore.listQueued().find((row) => row.number === 2);
       expect(afterUpsert?.approved).toBe(true);
+      expect(afterUpsert?.ciStatus).toBe('passing');
 
       migratedStore.close();
     } finally {

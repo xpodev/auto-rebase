@@ -13,6 +13,7 @@ function pr(overrides: Partial<PRRecord>): PRRecord {
     isDraft: false,
     autoMergeEnabled: false,
     approved: false,
+    ciStatus: 'pending',
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
   };

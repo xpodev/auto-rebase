@@ -1,3 +1,5 @@
+export type CiStatus = 'passing' | 'pending' | 'failing';
+
 export interface PRRecord {
   number: number;
   headRef: string;
@@ -6,6 +8,7 @@ export interface PRRecord {
   isDraft: boolean;
   autoMergeEnabled: boolean;
   approved: boolean;
+  ciStatus: CiStatus;
   createdAt: string; // ISO 8601
 }
 

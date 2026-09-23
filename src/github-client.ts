@@ -1,5 +1,5 @@
 import { createAppAuth } from '@octokit/auth-app';
-import type { PRRecord, Config } from './types';
+import type { PRRecord, Config, CiStatus } from './types';
 
 export interface RawPR {
   number: number;
@@ -12,7 +12,17 @@ export interface RawPR {
 
 export interface ReviewDecisionSearchResult {
   search: {
-    nodes: Array<{ number?: number; reviewDecision?: string | null }>;
+    nodes: Array<{
+      number?: number;
+      reviewDecision?: string | null;
+      commits?: {
+        nodes: Array<{
+          commit: {
+            statusCheckRollup?: { state?: string | null } | null;
+          };
+        }>;
+      };
+    }>;
   };
 }
 
@@ -51,7 +61,7 @@ export interface GitHubClient {
   commentOnPR(number: number, body: string): Promise<void>;
 }
 
-export function mapPullRequest(raw: RawPR, approved = false): PRRecord {
+export function mapPullRequest(raw: RawPR, approved = false, ciStatus: CiStatus = 'pending'): PRRecord {
   return {
     number: raw.number,
     headRef: raw.head.ref,
@@ -60,6 +70,7 @@ export function mapPullRequest(raw: RawPR, approved = false): PRRecord {
     isDraft: raw.draft === true,
     autoMergeEnabled: raw.auto_merge != null,
     approved,
+    ciStatus,
     createdAt: raw.created_at,
   };
 }
@@ -71,36 +82,70 @@ const REVIEW_DECISION_QUERY = `
         ... on PullRequest {
           number
           reviewDecision
+          commits(last: 1) {
+            nodes {
+              commit {
+                statusCheckRollup {
+                  state
+                }
+              }
+            }
+          }
         }
       }
     }
   }
 `;
 
-async function fetchApprovedPRNumbers(
+function mapRollupState(state: string | null | undefined): CiStatus {
+  switch (state) {
+    case 'SUCCESS':
+      return 'passing';
+    case 'FAILURE':
+    case 'ERROR':
+      return 'failing';
+    default:
+      // null (no checks reported yet), EXPECTED, or PENDING all mean "not
+      // known to be broken" — give the benefit of the doubt.
+      return 'pending';
+  }
+}
+
+interface PRSignals {
+  approved: boolean;
+  ciStatus: CiStatus;
+}
+
+async function fetchPRSignals(
   octokit: OctokitLike,
   owner: string,
   repo: string
-): Promise<Set<number>> {
+): Promise<Map<number, PRSignals>> {
   const result = await octokit.graphql(REVIEW_DECISION_QUERY, {
     searchQuery: `repo:${owner}/${repo} is:pr is:open`,
   });
 
-  const approved = new Set<number>();
+  const signals = new Map<number, PRSignals>();
   for (const node of result.search.nodes) {
-    if (node.number != null && node.reviewDecision === 'APPROVED') {
-      approved.add(node.number);
-    }
+    if (node.number == null) continue;
+    const rollupState = node.commits?.nodes[0]?.commit.statusCheckRollup?.state;
+    signals.set(node.number, {
+      approved: node.reviewDecision === 'APPROVED',
+      ciStatus: mapRollupState(rollupState),
+    });
   }
-  return approved;
+  return signals;
 }
 
 export function createGitHubClient(owner: string, repo: string, octokit: OctokitLike): GitHubClient {
   return {
     async listOpenPRs(): Promise<PRRecord[]> {
       const { data } = await octokit.rest.pulls.list({ owner, repo, state: 'open', per_page: 100 });
-      const approvedNumbers = await fetchApprovedPRNumbers(octokit, owner, repo);
-      return data.map((raw) => mapPullRequest(raw, approvedNumbers.has(raw.number)));
+      const signals = await fetchPRSignals(octokit, owner, repo);
+      return data.map((raw) => {
+        const prSignals = signals.get(raw.number);
+        return mapPullRequest(raw, prSignals?.approved ?? false, prSignals?.ciStatus ?? 'pending');
+      });
     },
 
     async getBaseBranchHeadSha(branch: string): Promise<string> {

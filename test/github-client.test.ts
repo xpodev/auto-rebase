@@ -20,6 +20,7 @@ describe('mapPullRequest', () => {
       isDraft: false,
       autoMergeEnabled: false,
       approved: false,
+      ciStatus: 'pending',
       createdAt: '2026-02-01T12:00:00Z',
     });
   });
@@ -153,6 +154,60 @@ describe('GitHubClient', () => {
     expect(graphql).toHaveBeenCalledWith(expect.any(String), {
       searchQuery: 'repo:acme/widgets is:pr is:open',
     });
+  });
+
+  it('listOpenPRs maps statusCheckRollup state into ciStatus, defaulting missing/unknown to pending', async () => {
+    const graphql = vi.fn().mockResolvedValue({
+      search: {
+        nodes: [
+          {
+            number: 1,
+            reviewDecision: null,
+            commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
+          },
+          {
+            number: 2,
+            reviewDecision: null,
+            commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE' } } }] },
+          },
+          {
+            number: 3,
+            reviewDecision: null,
+            commits: { nodes: [{ commit: { statusCheckRollup: { state: 'PENDING' } } }] },
+          },
+          {
+            number: 4,
+            reviewDecision: null,
+            commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+          },
+        ],
+      },
+    });
+    const octokit = fakeOctokit(
+      {
+        pulls: {
+          list: vi.fn().mockResolvedValue({
+            data: [1, 2, 3, 4].map((number) => ({
+              number,
+              head: { ref: `pr-${number}`, sha: `sha-${number}` },
+              base: { ref: 'main' },
+              draft: false,
+              auto_merge: null,
+              created_at: '2026-01-01T00:00:00Z',
+            })),
+          }),
+        },
+      } as any,
+      graphql
+    );
+
+    const client = createGitHubClient('acme', 'widgets', octokit);
+    const prs = await client.listOpenPRs();
+
+    expect(prs.find((pr) => pr.number === 1)?.ciStatus).toBe('passing');
+    expect(prs.find((pr) => pr.number === 2)?.ciStatus).toBe('failing');
+    expect(prs.find((pr) => pr.number === 3)?.ciStatus).toBe('pending');
+    expect(prs.find((pr) => pr.number === 4)?.ciStatus).toBe('pending');
   });
 
   it('getBaseBranchHeadSha returns the branch commit sha', async () => {
