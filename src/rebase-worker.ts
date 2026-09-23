@@ -20,6 +20,8 @@ export function createRebaseWorker(config: {
       await simpleGit(config.gitWorkdir).init();
     }
     const git = simpleGit(config.gitWorkdir);
+    await git.addConfig('user.name', 'auto-rebase-bot');
+    await git.addConfig('user.email', 'auto-rebase-bot@users.noreply.github.com');
     const remoteUrl = await config.getRemoteUrl();
     const remotes = await git.getRemotes();
     if (remotes.some((r) => r.name === 'origin')) {
@@ -45,11 +47,15 @@ export function createRebaseWorker(config: {
 
       try {
         await git.rebase([`origin/${pr.baseRef}`]);
-      } catch {
+      } catch (err) {
+        const message = String(err);
         await git.rebase(['--abort']).catch(() => undefined);
         await git.checkout(['origin/' + pr.baseRef]).catch(() => undefined);
         await git.branch(['-D', tmpBranch]).catch(() => undefined);
-        return { outcome: 'conflict' };
+        if (message.includes('CONFLICT')) {
+          return { outcome: 'conflict' };
+        }
+        return { outcome: 'transient-failure', error: message };
       }
 
       try {

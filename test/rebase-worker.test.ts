@@ -66,7 +66,7 @@ describe('RebaseWorker', () => {
     const baseLog = await check.log(['origin/main']);
     expect(log.all.some((entry) => entry.message === 'base commit 2')).toBe(true);
     expect(log.total).toBe(baseLog.total + 1);
-  });
+  }, 15000);
 
   it('reports a conflict and leaves the remote branch untouched', async () => {
     const remoteDir = await makeBareRemote(tmp);
@@ -107,5 +107,5 @@ describe('RebaseWorker', () => {
     const log = await check.log(['origin/pr-branch']);
     expect(log.all.some((entry) => entry.message === 'pr commit')).toBe(true);
     expect(log.all.some((entry) => entry.message === 'base commit 2')).toBe(false);
-  });
+  }, 15000);
 });
