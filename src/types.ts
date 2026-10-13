@@ -1,3 +1,5 @@
+import type { PriorityTier } from './priority';
+
 export type CiStatus = 'passing' | 'pending' | 'failing';
 
 export interface PRRecord {
@@ -29,4 +31,5 @@ export interface Config {
   pollIntervalMs: number;
   gitWorkdir: string;
   dbPath: string;
+  priorityOrder: PriorityTier[];
 }

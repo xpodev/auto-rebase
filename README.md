@@ -40,6 +40,20 @@ design.
    | `POLL_INTERVAL_MS`            | no       | `60000`          |
    | `GIT_WORKDIR`                 | no       | `.git-workdir`   |
    | `DB_PATH`                     | no       | `./pr-queue.db`  |
+   | `PRIORITY_CONFIG_PATH`        | no       | built-in order   |
+
+   `PRIORITY_CONFIG_PATH` points to a JSON file controlling which PRs get
+   rebased and in what order:
+
+   ```json
+   { "priorityOrder": [["AUTO_MERGE_ON", "PR_APPROVED"], ["AUTO_MERGE_ON"]] }
+   ```
+
+   Each inner list is a tier whose rules must all match; earlier tiers win,
+   and oldest-first breaks ties within a tier. PRs matching no tier are never
+   rebased (an empty tier `[]` matches everything). Rules: `AUTO_MERGE_ON`,
+   `PR_APPROVED`, `CI_PASSING`, `CI_PENDING`. Drafts and failing-CI PRs are
+   always excluded. The built-in order is the one described above.
 
 4. `npm install && npm run build && npm start`
 

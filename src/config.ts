@@ -1,4 +1,15 @@
+import { readFileSync } from 'node:fs';
 import type { Config } from './types';
+import { DEFAULT_PRIORITY_ORDER, parsePriorityConfig, type PriorityTier } from './priority';
+
+function loadPriorityOrder(path: string | undefined): PriorityTier[] {
+  if (!path) return DEFAULT_PRIORITY_ORDER;
+  try {
+    return parsePriorityConfig(JSON.parse(readFileSync(path, 'utf8')));
+  } catch (err) {
+    throw new Error(`Invalid PRIORITY_CONFIG_PATH (${path}): ${(err as Error).message}`);
+  }
+}
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
@@ -25,5 +36,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pollIntervalMs: Number(env.POLL_INTERVAL_MS ?? '60000'),
     gitWorkdir: env.GIT_WORKDIR ?? '.git-workdir',
     dbPath: env.DB_PATH ?? './pr-queue.db',
+    priorityOrder: loadPriorityOrder(env.PRIORITY_CONFIG_PATH),
   };
 }
