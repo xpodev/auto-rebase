@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { loadConfig } from '../src/config';
 
 const baseEnv = {
@@ -33,6 +36,22 @@ describe('loadConfig', () => {
     expect(config.pollIntervalMs).toBe(15000);
     expect(config.gitWorkdir).toBe('/tmp/work');
     expect(config.dbPath).toBe('/tmp/queue.db');
+  });
+
+  it('loads priorityOrder from PRIORITY_CONFIG_PATH', () => {
+    const file = path.join(os.tmpdir(), `priority-${Date.now()}.json`);
+    fs.writeFileSync(file, JSON.stringify({ priorityOrder: [['AUTO_MERGE_ON']] }));
+    try {
+      expect(loadConfig({ ...baseEnv, PRIORITY_CONFIG_PATH: file }).priorityOrder).toEqual([['AUTO_MERGE_ON']]);
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  });
+
+  it('throws on an invalid priority config file', () => {
+    expect(() => loadConfig({ ...baseEnv, PRIORITY_CONFIG_PATH: '/does/not/exist.json' })).toThrow(
+      /PRIORITY_CONFIG_PATH/
+    );
   });
 
   it('throws when a required var is missing', () => {

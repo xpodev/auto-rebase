@@ -19,7 +19,7 @@ function main(): void {
   });
 
   const client = createGitHubClient(config.repoOwner, config.repoName, octokit);
-  const store = createStore(config.dbPath, config.baseBranch);
+  const store = createStore(config.dbPath, config.baseBranch, config.priorityOrder);
   store.resetStuckRebasing();
 
   const getToken = createTokenProvider(config);

@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import type { CiStatus, PRRecord, PRRow, PRStatus } from './types';
+import { DEFAULT_PRIORITY_ORDER, rankQueue, type PriorityTier } from './priority';
 
 export interface Store {
   upsertPR(pr: PRRecord): void;
@@ -42,7 +43,11 @@ function toPRRow(row: PRRowSql): PRRow {
   };
 }
 
-export function createStore(dbPath: string, baseBranch: string): Store {
+export function createStore(
+  dbPath: string,
+  baseBranch: string,
+  priorityOrder: PriorityTier[] = DEFAULT_PRIORITY_ORDER
+): Store {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
 
@@ -142,18 +147,10 @@ export function createStore(dbPath: string, baseBranch: string): Store {
       const rows = db
         .prepare(
           `SELECT * FROM pr_queue WHERE status = 'queued' AND is_draft = 0 AND ci_status != 'failing'
-           ORDER BY
-             CASE WHEN ci_status = 'passing' THEN 0 ELSE 1 END ASC,
-             CASE
-               WHEN auto_merge_enabled = 1 AND approved = 1 THEN 0
-               WHEN auto_merge_enabled = 1 THEN 1
-               WHEN approved = 1 THEN 2
-               ELSE 3
-             END ASC,
-             created_at ASC`
+           ORDER BY created_at ASC`
         )
         .all() as PRRowSql[];
-      return rows.map(toPRRow);
+      return rankQueue(rows.map(toPRRow), priorityOrder);
     },
 
     resetStuckRebasing(): void {
