@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePriorityConfig, rankQueue } from '../src/priority';
+import { parsePriorityOrder, rankQueue } from '../src/priority';
 import type { PRRow } from '../src/types';
 
 function row(overrides: Partial<PRRow>): PRRow {
@@ -20,7 +20,7 @@ function row(overrides: Partial<PRRow>): PRRow {
 }
 
 describe('rankQueue', () => {
-  const order = parsePriorityConfig({ priorityOrder: [['AUTO_MERGE_ON', 'PR_APPROVED'], ['AUTO_MERGE_ON']] });
+  const order = parsePriorityOrder([['AUTO_MERGE_ON', 'PR_APPROVED'], ['AUTO_MERGE_ON']]);
 
   it('orders by first matching tier, keeping input order within a tier', () => {
     const rows = [
@@ -41,13 +41,13 @@ describe('rankQueue', () => {
   });
 });
 
-describe('parsePriorityConfig', () => {
+describe('parsePriorityOrder', () => {
   it('rejects unknown rule names', () => {
-    expect(() => parsePriorityConfig({ priorityOrder: [['NOPE']] })).toThrow(/known rule/);
+    expect(() => parsePriorityOrder([['NOPE']])).toThrow(/known rule/);
   });
 
-  it('rejects a missing or malformed priorityOrder', () => {
-    expect(() => parsePriorityConfig({})).toThrow(/priorityOrder/);
-    expect(() => parsePriorityConfig({ priorityOrder: ['AUTO_MERGE_ON'] })).toThrow(/array/);
+  it('rejects a malformed priorityOrder', () => {
+    expect(() => parsePriorityOrder({})).toThrow(/priorityOrder/);
+    expect(() => parsePriorityOrder(['AUTO_MERGE_ON'])).toThrow(/array/);
   });
 });

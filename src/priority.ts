@@ -12,10 +12,6 @@ export type PriorityRuleName = keyof typeof RULES;
 // A tier is a list of rules that must ALL match. An empty tier matches every PR.
 export type PriorityTier = PriorityRuleName[];
 
-export interface PriorityConfig {
-  priorityOrder: PriorityTier[];
-}
-
 // Equivalent to the original hard-coded ordering: passing CI first, then
 // auto-merge+approved, auto-merge, approved, everything else.
 export const DEFAULT_PRIORITY_ORDER: PriorityTier[] = (['CI_PASSING', null] as const).flatMap((ci) =>
@@ -24,10 +20,9 @@ export const DEFAULT_PRIORITY_ORDER: PriorityTier[] = (['CI_PASSING', null] as c
   )
 );
 
-export function parsePriorityConfig(raw: unknown): PriorityTier[] {
-  const order = (raw as { priorityOrder?: unknown } | null)?.priorityOrder;
+export function parsePriorityOrder(order: unknown): PriorityTier[] {
   if (!Array.isArray(order)) {
-    throw new Error('Priority config must be an object with a "priorityOrder" array');
+    throw new Error('"priorityOrder" must be an array of tiers');
   }
   return order.map((tier, i) => {
     if (!Array.isArray(tier)) {

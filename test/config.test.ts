@@ -38,19 +38,37 @@ describe('loadConfig', () => {
     expect(config.dbPath).toBe('/tmp/queue.db');
   });
 
-  it('loads priorityOrder from PRIORITY_CONFIG_PATH', () => {
+  it('loads priorityOrder from CONFIG_PATH', () => {
     const file = path.join(os.tmpdir(), `priority-${Date.now()}.json`);
     fs.writeFileSync(file, JSON.stringify({ priorityOrder: [['AUTO_MERGE_ON']] }));
     try {
-      expect(loadConfig({ ...baseEnv, PRIORITY_CONFIG_PATH: file }).priorityOrder).toEqual([['AUTO_MERGE_ON']]);
+      expect(loadConfig({ ...baseEnv, CONFIG_PATH: file }).priorityOrder).toEqual([['AUTO_MERGE_ON']]);
     } finally {
       fs.rmSync(file, { force: true });
     }
   });
 
+  it('loads priorityOrder from inline CONFIG, taking precedence over the path', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      CONFIG: '{"priorityOrder":[["PR_APPROVED"]]}',
+      CONFIG_PATH: '/does/not/exist.json',
+    });
+    expect(config.priorityOrder).toEqual([['PR_APPROVED']]);
+  });
+
+  it('rejects unknown keys and falls back to the default order when priorityOrder is absent', () => {
+    expect(() => loadConfig({ ...baseEnv, CONFIG: '{"priorityOrdr":[]}' })).toThrow(/unknown key/);
+    expect(loadConfig({ ...baseEnv, CONFIG: '{}' }).priorityOrder.length).toBeGreaterThan(0);
+  });
+
+  it('throws on invalid inline CONFIG', () => {
+    expect(() => loadConfig({ ...baseEnv, CONFIG: 'not json' })).toThrow(/CONFIG/);
+  });
+
   it('throws on an invalid priority config file', () => {
-    expect(() => loadConfig({ ...baseEnv, PRIORITY_CONFIG_PATH: '/does/not/exist.json' })).toThrow(
-      /PRIORITY_CONFIG_PATH/
+    expect(() => loadConfig({ ...baseEnv, CONFIG_PATH: '/does/not/exist.json' })).toThrow(
+      /CONFIG_PATH/
     );
   });
 

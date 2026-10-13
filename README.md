@@ -40,10 +40,13 @@ design.
    | `POLL_INTERVAL_MS`            | no       | `60000`          |
    | `GIT_WORKDIR`                 | no       | `.git-workdir`   |
    | `DB_PATH`                     | no       | `./pr-queue.db`  |
-   | `PRIORITY_CONFIG_PATH`        | no       | built-in order   |
+   | `CONFIG`                      | no       | built-in defaults |
+   | `CONFIG_PATH`                 | no       | built-in defaults |
 
-   `PRIORITY_CONFIG_PATH` points to a JSON file controlling which PRs get
-   rebased and in what order:
+   `CONFIG` holds a JSON config inline (takes precedence); `CONFIG_PATH`
+   points to a JSON file instead. Unknown keys are rejected. Currently the
+   only key is `priorityOrder`, which controls which PRs get rebased and in
+   what order:
 
    ```json
    { "priorityOrder": [["AUTO_MERGE_ON", "PR_APPROVED"], ["AUTO_MERGE_ON"]] }
