@@ -12,8 +12,8 @@ function pr(overrides: Partial<PRRecord>): PRRecord {
     headSha: 'sha1',
     baseRef: 'main',
     isDraft: false,
-    autoMergeEnabled: false,
-    approved: false,
+    autoMergeEnabled: true,
+    approved: true,
     ciStatus: 'pending',
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -55,13 +55,13 @@ describe('startOrchestrator', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(client.listOpenPRs).toHaveBeenCalledTimes(1);
     expect(worker.rebasePR).toHaveBeenCalledTimes(1);
-    expect(store.getLastProcessedBaseSha()).toBe('sha-a');
+    expect(store.getTracking()).toMatchObject({ number: 1, baseSha: 'sha-a' });
 
     baseSha = 'sha-b';
     await vi.advanceTimersByTimeAsync(1000);
     expect(client.listOpenPRs).toHaveBeenCalledTimes(2);
     expect(worker.rebasePR).toHaveBeenCalledTimes(2);
-    expect(store.getLastProcessedBaseSha()).toBe('sha-b');
+    expect(store.getTracking()).toMatchObject({ number: 1, baseSha: 'sha-b' });
 
     handle.stop();
     baseSha = 'sha-c';

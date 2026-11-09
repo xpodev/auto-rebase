@@ -3,6 +3,7 @@ import { runSchedulerTick } from './scheduler';
 import type { Store } from './store';
 import type { GitHubClient } from './github-client';
 import type { RebaseWorker } from './rebase-worker';
+import type { PriorityTier } from './priority';
 
 export function startOrchestrator(deps: {
   store: Store;
@@ -10,6 +11,8 @@ export function startOrchestrator(deps: {
   worker: RebaseWorker;
   baseBranch: string;
   pollIntervalMs: number;
+  priorityOrder?: PriorityTier[];
+  staleAfterMs?: number | null;
 }): { stop: () => void } {
   let stopped = false;
 
@@ -17,10 +20,10 @@ export function startOrchestrator(deps: {
     if (stopped) return;
     try {
       await reconcile(deps.client, deps.store);
-      const result = await runSchedulerTick(deps.store, deps.client, deps.worker, deps.baseBranch);
-      if (result.attempted) {
-        console.log('[auto-rebase] rebase cascade attempted for latest base-branch change');
-      }
+      await runSchedulerTick(deps.store, deps.client, deps.worker, deps.baseBranch, {
+        priorityOrder: deps.priorityOrder,
+        staleAfterMs: deps.staleAfterMs,
+      });
     } catch (err) {
       console.error('[auto-rebase] poll tick failed:', err);
     }

@@ -10,6 +10,16 @@ export interface RawPR {
   created_at: string;
 }
 
+// A CheckRun (GitHub Actions / Checks API) or a StatusContext (classic commit status).
+export interface StatusContextNode {
+  __typename?: string;
+  name?: string; // CheckRun
+  status?: string | null; // CheckRun: QUEUED, IN_PROGRESS, COMPLETED, ...
+  conclusion?: string | null; // CheckRun: SUCCESS, FAILURE, ...
+  context?: string; // StatusContext
+  state?: string | null; // StatusContext: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED
+}
+
 export interface ReviewDecisionSearchResult {
   search: {
     nodes: Array<{
@@ -18,7 +28,10 @@ export interface ReviewDecisionSearchResult {
       commits?: {
         nodes: Array<{
           commit: {
-            statusCheckRollup?: { state?: string | null } | null;
+            statusCheckRollup?: {
+              state?: string | null;
+              contexts?: { nodes: Array<StatusContextNode | null> } | null;
+            } | null;
           };
         }>;
       };
@@ -87,6 +100,20 @@ const REVIEW_DECISION_QUERY = `
               commit {
                 statusCheckRollup {
                   state
+                  contexts(first: 100) {
+                    nodes {
+                      __typename
+                      ... on CheckRun {
+                        name
+                        status
+                        conclusion
+                      }
+                      ... on StatusContext {
+                        context
+                        state
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -111,6 +138,31 @@ function mapRollupState(state: string | null | undefined): CiStatus {
   }
 }
 
+const PASSING_CONCLUSIONS = ['SUCCESS', 'NEUTRAL', 'SKIPPED'];
+
+function contextStatus(node: StatusContextNode): CiStatus {
+  if (node.name !== undefined) {
+    if (node.status !== 'COMPLETED') return 'pending';
+    return PASSING_CONCLUSIONS.includes(node.conclusion ?? '') ? 'passing' : 'failing';
+  }
+  return mapRollupState(node.state);
+}
+
+// CI status considering only the configured check names. Any failing -> failing;
+// all present and passing -> passing; otherwise (missing or still running) -> pending.
+export function mapNamedChecks(contexts: Array<StatusContextNode | null>, ciChecks: string[]): CiStatus {
+  const byName = new Map<string, CiStatus>();
+  for (const node of contexts) {
+    if (!node) continue;
+    const name = node.name ?? node.context;
+    if (name !== undefined) byName.set(name, contextStatus(node));
+  }
+  const statuses = ciChecks.map((name) => byName.get(name) ?? 'pending');
+  if (statuses.includes('failing')) return 'failing';
+  if (statuses.every((status) => status === 'passing')) return 'passing';
+  return 'pending';
+}
+
 interface PRSignals {
   approved: boolean;
   ciStatus: CiStatus;
@@ -119,7 +171,8 @@ interface PRSignals {
 async function fetchPRSignals(
   octokit: OctokitLike,
   owner: string,
-  repo: string
+  repo: string,
+  ciChecks: string[]
 ): Promise<Map<number, PRSignals>> {
   const result = await octokit.graphql(REVIEW_DECISION_QUERY, {
     searchQuery: `repo:${owner}/${repo} is:pr is:open`,
@@ -128,20 +181,30 @@ async function fetchPRSignals(
   const signals = new Map<number, PRSignals>();
   for (const node of result.search.nodes) {
     if (node.number == null) continue;
-    const rollupState = node.commits?.nodes[0]?.commit.statusCheckRollup?.state;
+    const rollup = node.commits?.nodes[0]?.commit.statusCheckRollup;
     signals.set(node.number, {
       approved: node.reviewDecision === 'APPROVED',
-      ciStatus: mapRollupState(rollupState),
+      ciStatus:
+        ciChecks.length > 0
+          ? mapNamedChecks(rollup?.contexts?.nodes ?? [], ciChecks)
+          : mapRollupState(rollup?.state),
     });
   }
   return signals;
 }
 
-export function createGitHubClient(owner: string, repo: string, octokit: OctokitLike): GitHubClient {
+// ciChecks: when non-empty, CI status is derived only from these check names
+// instead of the overall statusCheckRollup state.
+export function createGitHubClient(
+  owner: string,
+  repo: string,
+  octokit: OctokitLike,
+  ciChecks: string[] = []
+): GitHubClient {
   return {
     async listOpenPRs(): Promise<PRRecord[]> {
       const { data } = await octokit.rest.pulls.list({ owner, repo, state: 'open', per_page: 100 });
-      const signals = await fetchPRSignals(octokit, owner, repo);
+      const signals = await fetchPRSignals(octokit, owner, repo, ciChecks);
       return data.map((raw) => {
         const prSignals = signals.get(raw.number);
         return mapPullRequest(raw, prSignals?.approved ?? false, prSignals?.ciStatus ?? 'pending');

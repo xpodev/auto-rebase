@@ -1,15 +1,16 @@
 import Database from 'better-sqlite3';
-import type { CiStatus, PRRecord, PRRow, PRStatus } from './types';
-import { DEFAULT_PRIORITY_ORDER, rankQueue, type PriorityTier } from './priority';
+import type { CiStatus, PRRecord, PRRow, PRStatus, Tracking } from './types';
 
 export interface Store {
   upsertPR(pr: PRRecord): void;
   deleteMissing(openNumbers: number[]): void;
   setStatus(number: number, status: PRStatus): void;
+  // Rebase candidates: queued, approved, non-draft, CI not failing — oldest first, unranked.
   listQueued(): PRRow[];
   resetStuckRebasing(): void;
-  getLastProcessedBaseSha(): string | null;
-  setLastProcessedBaseSha(sha: string): void;
+  getTracking(): Tracking | null;
+  setTracking(tracking: Tracking): void;
+  clearTracking(): void;
   close(): void;
 }
 
@@ -43,11 +44,7 @@ function toPRRow(row: PRRowSql): PRRow {
   };
 }
 
-export function createStore(
-  dbPath: string,
-  baseBranch: string,
-  priorityOrder: PriorityTier[] = DEFAULT_PRIORITY_ORDER
-): Store {
+export function createStore(dbPath: string, baseBranch: string): Store {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
 
@@ -69,7 +66,11 @@ export function createStore(
     CREATE TABLE IF NOT EXISTS repo_state (
       id                       INTEGER PRIMARY KEY CHECK (id = 1),
       base_branch              TEXT NOT NULL,
-      last_processed_base_sha  TEXT
+      last_processed_base_sha  TEXT,
+      tracked_pr               INTEGER,
+      tracked_since            TEXT,
+      tracked_base_sha         TEXT,
+      tracked_ci_passed        INTEGER NOT NULL DEFAULT 0
     );
   `);
 
@@ -79,6 +80,18 @@ export function createStore(
   }
   if (!existingColumns.some((column) => column.name === 'ci_status')) {
     db.exec(`ALTER TABLE pr_queue ADD COLUMN ci_status TEXT NOT NULL DEFAULT 'pending'`);
+  }
+
+  const repoStateColumns = db.prepare(`PRAGMA table_info(repo_state)`).all() as Array<{ name: string }>;
+  for (const [name, type] of [
+    ['tracked_pr', 'INTEGER'],
+    ['tracked_since', 'TEXT'],
+    ['tracked_base_sha', 'TEXT'],
+    ['tracked_ci_passed', 'INTEGER NOT NULL DEFAULT 0'],
+  ]) {
+    if (!repoStateColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE repo_state ADD COLUMN ${name} ${type}`);
+    }
   }
 
   db.prepare(
@@ -111,7 +124,11 @@ export function createStore(
         | undefined;
 
       let status: PRStatus = existing?.status ?? 'queued';
-      if (existing?.status === 'conflicted' && existing.head_sha !== pr.headSha) {
+      // A new commit from the author gives conflicted/stale PRs another chance.
+      if (
+        (existing?.status === 'conflicted' || existing?.status === 'stale') &&
+        existing.head_sha !== pr.headSha
+      ) {
         status = 'queued';
       }
 
@@ -146,11 +163,12 @@ export function createStore(
     listQueued(): PRRow[] {
       const rows = db
         .prepare(
-          `SELECT * FROM pr_queue WHERE status = 'queued' AND is_draft = 0 AND ci_status != 'failing'
+          `SELECT * FROM pr_queue
+           WHERE status = 'queued' AND is_draft = 0 AND approved = 1 AND ci_status != 'failing'
            ORDER BY created_at ASC`
         )
         .all() as PRRowSql[];
-      return rankQueue(rows.map(toPRRow), priorityOrder);
+      return rows.map(toPRRow);
     },
 
     resetStuckRebasing(): void {
@@ -159,15 +177,42 @@ export function createStore(
       );
     },
 
-    getLastProcessedBaseSha(): string | null {
-      const row = db.prepare(`SELECT last_processed_base_sha FROM repo_state WHERE id = 1`).get() as
-        | { last_processed_base_sha: string | null }
+    getTracking(): Tracking | null {
+      const row = db
+        .prepare(
+          `SELECT tracked_pr, tracked_since, tracked_base_sha, tracked_ci_passed FROM repo_state WHERE id = 1`
+        )
+        .get() as
+        | {
+            tracked_pr: number | null;
+            tracked_since: string | null;
+            tracked_base_sha: string | null;
+            tracked_ci_passed: number;
+          }
         | undefined;
-      return row?.last_processed_base_sha ?? null;
+      if (row?.tracked_pr == null || row.tracked_since == null || row.tracked_base_sha == null) {
+        return null;
+      }
+      return {
+        number: row.tracked_pr,
+        since: row.tracked_since,
+        baseSha: row.tracked_base_sha,
+        ciPassed: row.tracked_ci_passed === 1,
+      };
     },
 
-    setLastProcessedBaseSha(sha: string): void {
-      db.prepare(`UPDATE repo_state SET last_processed_base_sha = ? WHERE id = 1`).run(sha);
+    setTracking(tracking: Tracking): void {
+      db.prepare(
+        `UPDATE repo_state SET tracked_pr = ?, tracked_since = ?, tracked_base_sha = ?, tracked_ci_passed = ?
+         WHERE id = 1`
+      ).run(tracking.number, tracking.since, tracking.baseSha, tracking.ciPassed ? 1 : 0);
+    },
+
+    clearTracking(): void {
+      db.prepare(
+        `UPDATE repo_state SET tracked_pr = NULL, tracked_since = NULL, tracked_base_sha = NULL, tracked_ci_passed = 0
+         WHERE id = 1`
+      ).run();
     },
 
     close(): void {

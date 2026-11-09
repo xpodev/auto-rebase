@@ -1,15 +1,34 @@
 # auto-rebase-bot
 
-Polls a single GitHub repo and, each time a PR merges into the base branch,
-rebases exactly one other open PR — the highest-priority eligible one — onto
-the new base. PRs with failing CI (via the GraphQL `statusCheckRollup`,
-covering both classic commit statuses and Actions check-runs) are excluded
-from the queue entirely until the author pushes a new commit; PRs with
-passing CI are prioritized ahead of pending/unknown CI. Within each CI
-bucket, priority tiers are oldest-first: (1) auto-merge enabled and approved,
-(2) auto-merge enabled only, (3) approved only, (4) neither. Draft PRs are
-never touched. Conflicts are skipped (with a PR comment) rather than
-blocking the rest of the queue.
+Polls a single GitHub repo and shepherds one PR at a time toward merge: it
+picks the highest-priority eligible PR, rebases it onto the base branch,
+**tracks** it, and keeps it rebased every time the base branch moves until it
+merges. Then it moves on to the next one.
+
+Rules, re-evaluated on every poll tick:
+
+- **Eligibility.** Only approved, non-draft PRs are considered; everything
+  else is skipped entirely. PRs with failing CI are excluded until a new
+  commit is pushed.
+- **Priority** (default; oldest-first within a tier):
+  1. auto-merge on **and** CI passing
+  2. CI passing
+  3. auto-merge on
+
+  PRs matching none of these are not rebased. "CI passing" means all checks
+  named in `ciChecks` succeeded (or, if `ciChecks` is not set, the overall
+  `statusCheckRollup` is green).
+- **Preemption.** If a PR reaches a strictly higher tier than the tracked
+  PR, the bot switches to it immediately and rebases it. The CI re-run that
+  the bot's own rebase triggers does not demote the tracked PR.
+- **Stale timeout.** If the tracked PR hasn't merged within `STALE_TIMEOUT`,
+  it is marked stale and the bot moves to the next PR. A stale PR becomes
+  eligible again once the author pushes a new commit.
+- **Conflicts.** A PR that conflicts gets a comment, is marked conflicted,
+  and the bot moves to the next PR in the same tick. It becomes eligible
+  again once the author pushes a new commit.
+- A tracked PR that merges, closes, loses approval, becomes a draft or
+  starts failing CI is dropped and the next PR is picked.
 
 See `docs/superpowers/specs/2026-09-15-auto-rebase-bot-design.md` for the full
 design.
@@ -40,23 +59,35 @@ design.
    | `POLL_INTERVAL_MS`            | no       | `60000`          |
    | `GIT_WORKDIR`                 | no       | `.git-workdir`   |
    | `DB_PATH`                     | no       | `./pr-queue.db`  |
+   | `STALE_TIMEOUT`               | no       | disabled (never stale) |
    | `CONFIG`                      | no       | built-in defaults |
    | `CONFIG_PATH`                 | no       | built-in defaults |
 
+   `STALE_TIMEOUT` is how long a tracked PR may stay open before the bot
+   gives up on it and moves on, e.g. `30s`, `5m`, `16h`, `40d`, or combined
+   like `1h30m` (units: `ms`, `s`, `m`, `h`, `d`).
+
    `CONFIG` holds a JSON config inline (takes precedence); `CONFIG_PATH`
-   points to a JSON file instead. Unknown keys are rejected. Currently the
-   only key is `priorityOrder`, which controls which PRs get rebased and in
-   what order:
+   points to a JSON file instead. Unknown keys are rejected. Keys:
 
    ```json
-   { "priorityOrder": [["AUTO_MERGE_ON", "PR_APPROVED"], ["AUTO_MERGE_ON"]] }
+   {
+     "ciChecks": ["build", "test"],
+     "priorityOrder": [["AUTO_MERGE_ON", "CI_PASSING"], ["CI_PASSING"], ["AUTO_MERGE_ON"]]
+   }
    ```
 
-   Each inner list is a tier whose rules must all match; earlier tiers win,
-   and oldest-first breaks ties within a tier. PRs matching no tier are never
-   rebased (an empty tier `[]` matches everything). Rules: `AUTO_MERGE_ON`,
-   `PR_APPROVED`, `CI_PASSING`, `CI_PENDING`. Drafts and failing-CI PRs are
-   always excluded. The built-in order is the one described above.
+   - `ciChecks`: names of the required CI checks (GitHub Actions job/check-run
+     names or classic commit-status contexts). CI counts as passing only when
+     all of them succeeded, failing if any failed, and pending while any is
+     missing or still running. Other checks are ignored. If omitted, the
+     overall `statusCheckRollup` state is used.
+   - `priorityOrder`: each inner list is a tier whose rules must all match;
+     earlier tiers win, and oldest-first breaks ties within a tier. PRs
+     matching no tier are never rebased (an empty tier `[]` matches
+     everything). Rules: `AUTO_MERGE_ON`, `PR_APPROVED`, `CI_PASSING`,
+     `CI_PENDING`. Unapproved, draft, and failing-CI PRs are always excluded
+     before ranking. The default is shown above.
 
 4. `npm install && npm run build && npm start`
 

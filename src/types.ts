@@ -14,11 +14,20 @@ export interface PRRecord {
   createdAt: string; // ISO 8601
 }
 
-export type PRStatus = 'queued' | 'rebasing' | 'conflicted';
+// 'conflicted' and 'stale' are both cleared when the author pushes a new commit.
+export type PRStatus = 'queued' | 'rebasing' | 'conflicted' | 'stale';
 
 export interface PRRow extends PRRecord {
   status: PRStatus;
   updatedAt: string;
+}
+
+// The single PR the bot is currently shepherding toward merge.
+export interface Tracking {
+  number: number;
+  since: string; // ISO 8601 — when tracking started; drives the stale timeout
+  baseSha: string; // base-branch sha the PR was last rebased onto
+  ciPassed: boolean; // CI was seen passing while tracked (survives the re-run our rebase triggers)
 }
 
 export interface Config {
@@ -32,4 +41,6 @@ export interface Config {
   gitWorkdir: string;
   dbPath: string;
   priorityOrder: PriorityTier[];
+  ciChecks: string[];
+  staleAfterMs: number | null;
 }
