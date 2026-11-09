@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createGitHubClient, mapPullRequest, OctokitLike } from '../src/github-client';
+import { createGitHubClient, mapNamedChecks, mapPullRequest, OctokitLike } from '../src/github-client';
 
 describe('mapPullRequest', () => {
   it('maps a raw Octokit PR into a PRRecord', () => {
@@ -210,6 +210,52 @@ describe('GitHubClient', () => {
     expect(prs.find((pr) => pr.number === 4)?.ciStatus).toBe('pending');
   });
 
+  it('listOpenPRs uses only the configured CI checks when ciChecks is set', async () => {
+    const contexts = {
+      nodes: [
+        { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { __typename: 'StatusContext', context: 'lint', state: 'SUCCESS' },
+        { __typename: 'CheckRun', name: 'flaky-optional', status: 'COMPLETED', conclusion: 'FAILURE' },
+      ],
+    };
+    const graphql = vi.fn().mockResolvedValue({
+      search: {
+        nodes: [
+          {
+            number: 1,
+            reviewDecision: 'APPROVED',
+            commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE', contexts } } }] },
+          },
+        ],
+      },
+    });
+    const octokit = fakeOctokit(
+      {
+        pulls: {
+          list: vi.fn().mockResolvedValue({
+            data: [
+              {
+                number: 1,
+                head: { ref: 'a', sha: 'sha-a' },
+                base: { ref: 'main' },
+                draft: false,
+                auto_merge: null,
+                created_at: '2026-01-01T00:00:00Z',
+              },
+            ],
+          }),
+        },
+      } as any,
+      graphql
+    );
+
+    const prs = await createGitHubClient('acme', 'widgets', octokit, ['build', 'lint']).listOpenPRs();
+    expect(prs[0].ciStatus).toBe('passing');
+
+    const allChecks = await createGitHubClient('acme', 'widgets', octokit).listOpenPRs();
+    expect(allChecks[0].ciStatus).toBe('failing');
+  });
+
   it('getBaseBranchHeadSha returns the branch commit sha', async () => {
     const octokit = fakeOctokit();
     const client = createGitHubClient('acme', 'widgets', octokit);
@@ -232,5 +278,35 @@ describe('GitHubClient', () => {
       issue_number: 5,
       body: 'hello',
     });
+  });
+});
+
+describe('mapNamedChecks', () => {
+  const run = (name: string, status: string, conclusion: string | null = null) => ({
+    __typename: 'CheckRun',
+    name,
+    status,
+    conclusion,
+  });
+
+  it('is passing only when every named check passed (neutral/skipped count as passed)', () => {
+    expect(
+      mapNamedChecks([run('a', 'COMPLETED', 'SUCCESS'), run('b', 'COMPLETED', 'SKIPPED')], ['a', 'b'])
+    ).toBe('passing');
+  });
+
+  it('is failing when any named check failed, even if others are still running', () => {
+    expect(
+      mapNamedChecks(
+        [run('a', 'IN_PROGRESS'), { __typename: 'StatusContext', context: 'b', state: 'ERROR' }],
+        ['a', 'b']
+      )
+    ).toBe('failing');
+    expect(mapNamedChecks([run('a', 'COMPLETED', 'TIMED_OUT')], ['a'])).toBe('failing');
+  });
+
+  it('is pending when a named check is missing or still running', () => {
+    expect(mapNamedChecks([run('a', 'COMPLETED', 'SUCCESS')], ['a', 'b'])).toBe('pending');
+    expect(mapNamedChecks([run('a', 'QUEUED'), null], ['a'])).toBe('pending');
   });
 });

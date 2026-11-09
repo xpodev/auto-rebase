@@ -18,8 +18,8 @@ function main(): void {
     },
   });
 
-  const client = createGitHubClient(config.repoOwner, config.repoName, octokit);
-  const store = createStore(config.dbPath, config.baseBranch, config.priorityOrder);
+  const client = createGitHubClient(config.repoOwner, config.repoName, octokit, config.ciChecks);
+  const store = createStore(config.dbPath, config.baseBranch);
   store.resetStuckRebasing();
 
   const getToken = createTokenProvider(config);
@@ -37,6 +37,8 @@ function main(): void {
     worker,
     baseBranch: config.baseBranch,
     pollIntervalMs: config.pollIntervalMs,
+    priorityOrder: config.priorityOrder,
+    staleAfterMs: config.staleAfterMs,
   });
 
   const shutdown = (): void => {
@@ -49,7 +51,9 @@ function main(): void {
   process.on('SIGTERM', shutdown);
 
   console.log(
-    `[auto-rebase] watching ${config.repoOwner}/${config.repoName}@${config.baseBranch}, polling every ${config.pollIntervalMs}ms`
+    `[auto-rebase] watching ${config.repoOwner}/${config.repoName}@${config.baseBranch}, polling every ${config.pollIntervalMs}ms, ` +
+      `stale timeout ${config.staleAfterMs === null ? 'disabled' : `${config.staleAfterMs}ms`}, ` +
+      `CI checks ${config.ciChecks.length > 0 ? config.ciChecks.join(', ') : '(all, via rollup)'}`
   );
 }
 

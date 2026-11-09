@@ -12,13 +12,13 @@ export type PriorityRuleName = keyof typeof RULES;
 // A tier is a list of rules that must ALL match. An empty tier matches every PR.
 export type PriorityTier = PriorityRuleName[];
 
-// Equivalent to the original hard-coded ordering: passing CI first, then
-// auto-merge+approved, auto-merge, approved, everything else.
-export const DEFAULT_PRIORITY_ORDER: PriorityTier[] = (['CI_PASSING', null] as const).flatMap((ci) =>
-  [['AUTO_MERGE_ON', 'PR_APPROVED'], ['AUTO_MERGE_ON'], ['PR_APPROVED'], []].map(
-    (tier) => (ci ? [ci, ...tier] : tier) as PriorityTier
-  )
-);
+// Approval and non-draft are hard prerequisites applied before ranking, so the
+// default only orders by auto-merge and CI. PRs with neither are not rebased.
+export const DEFAULT_PRIORITY_ORDER: PriorityTier[] = [
+  ['AUTO_MERGE_ON', 'CI_PASSING'],
+  ['CI_PASSING'],
+  ['AUTO_MERGE_ON'],
+];
 
 export function parsePriorityOrder(order: unknown): PriorityTier[] {
   if (!Array.isArray(order)) {
@@ -39,15 +39,23 @@ export function parsePriorityOrder(order: unknown): PriorityTier[] {
   });
 }
 
-function tierIndex(pr: PRRow, order: PriorityTier[]): number {
+export function tierIndex(pr: PRRow, order: PriorityTier[]): number {
   return order.findIndex((tier) => tier.every((rule) => RULES[rule](pr)));
 }
 
+export interface RankedPR {
+  row: PRRow;
+  tier: number; // lower is higher priority
+}
+
 // Drops PRs matching no tier; sorts the rest by tier, keeping input order within a tier.
-export function rankQueue(rows: PRRow[], order: PriorityTier[]): PRRow[] {
+export function rankWithTiers(rows: PRRow[], order: PriorityTier[]): RankedPR[] {
   return rows
     .map((row) => ({ row, tier: tierIndex(row, order) }))
     .filter((entry) => entry.tier !== -1)
-    .sort((a, b) => a.tier - b.tier)
-    .map((entry) => entry.row);
+    .sort((a, b) => a.tier - b.tier);
+}
+
+export function rankQueue(rows: PRRow[], order: PriorityTier[]): PRRow[] {
+  return rankWithTiers(rows, order).map((entry) => entry.row);
 }

@@ -62,6 +62,28 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...baseEnv, CONFIG: '{}' }).priorityOrder.length).toBeGreaterThan(0);
   });
 
+  it('defaults to no named CI checks and no stale timeout', () => {
+    const config = loadConfig(baseEnv);
+    expect(config.ciChecks).toEqual([]);
+    expect(config.staleAfterMs).toBeNull();
+    expect(config.priorityOrder).toEqual([['AUTO_MERGE_ON', 'CI_PASSING'], ['CI_PASSING'], ['AUTO_MERGE_ON']]);
+  });
+
+  it('loads ciChecks from CONFIG and rejects malformed values', () => {
+    expect(loadConfig({ ...baseEnv, CONFIG: '{"ciChecks":["build","test"]}' }).ciChecks).toEqual([
+      'build',
+      'test',
+    ]);
+    expect(() => loadConfig({ ...baseEnv, CONFIG: '{"ciChecks":"build"}' })).toThrow(/ciChecks/);
+    expect(() => loadConfig({ ...baseEnv, CONFIG: '{"ciChecks":[""]}' })).toThrow(/ciChecks/);
+  });
+
+  it('parses STALE_TIMEOUT', () => {
+    expect(loadConfig({ ...baseEnv, STALE_TIMEOUT: '16h' }).staleAfterMs).toBe(16 * 3_600_000);
+    expect(loadConfig({ ...baseEnv, STALE_TIMEOUT: '' }).staleAfterMs).toBeNull();
+    expect(() => loadConfig({ ...baseEnv, STALE_TIMEOUT: '10' })).toThrow(/STALE_TIMEOUT/);
+  });
+
   it('throws on invalid inline CONFIG', () => {
     expect(() => loadConfig({ ...baseEnv, CONFIG: 'not json' })).toThrow(/CONFIG/);
   });

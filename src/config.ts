@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import type { Config } from './types';
 import { DEFAULT_PRIORITY_ORDER, parsePriorityOrder } from './priority';
+import { parseDuration } from './duration';
 
-const KNOWN_CONFIG_KEYS = ['priorityOrder'];
+const KNOWN_CONFIG_KEYS = ['priorityOrder', 'ciChecks'];
 
 // General JSON config, from CONFIG (inline) or CONFIG_PATH (file); inline wins.
-function loadJsonConfig(env: NodeJS.ProcessEnv): { priorityOrder?: unknown } {
+function loadJsonConfig(env: NodeJS.ProcessEnv): { priorityOrder?: unknown; ciChecks?: unknown } {
   const inline = env.CONFIG;
   const path = env.CONFIG_PATH;
   if (!inline && !path) return {};
@@ -22,6 +23,23 @@ function loadJsonConfig(env: NodeJS.ProcessEnv): { priorityOrder?: unknown } {
     return raw;
   } catch (err) {
     throw new Error(`Invalid ${source}: ${(err as Error).message}`);
+  }
+}
+
+function parseCiChecks(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((name) => typeof name !== 'string' || name.trim() === '')) {
+    throw new Error('"ciChecks" must be an array of non-empty check names');
+  }
+  return value;
+}
+
+function parseStaleTimeout(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === '') return null;
+  try {
+    return parseDuration(value);
+  } catch (err) {
+    throw new Error(`Invalid STALE_TIMEOUT: ${(err as Error).message}`);
   }
 }
 
@@ -56,5 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       jsonConfig.priorityOrder === undefined
         ? DEFAULT_PRIORITY_ORDER
         : parsePriorityOrder(jsonConfig.priorityOrder),
+    ciChecks: parseCiChecks(jsonConfig.ciChecks),
+    staleAfterMs: parseStaleTimeout(env.STALE_TIMEOUT),
   };
 }

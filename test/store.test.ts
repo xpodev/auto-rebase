@@ -14,7 +14,7 @@ function pr(overrides: Partial<PRRecord>): PRRecord {
     baseRef: 'main',
     isDraft: false,
     autoMergeEnabled: false,
-    approved: false,
+    approved: true,
     ciStatus: 'pending',
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -40,25 +40,15 @@ describe('Store', () => {
     expect(queued[0].status).toBe('queued');
   });
 
-  it('orders queued PRs by auto-merge first, then created_at ascending', () => {
-    store.upsertPR(pr({ number: 1, createdAt: '2026-01-02T00:00:00Z', autoMergeEnabled: false }));
-    store.upsertPR(pr({ number: 2, createdAt: '2026-01-01T00:00:00Z', autoMergeEnabled: false }));
-    store.upsertPR(pr({ number: 3, createdAt: '2026-01-03T00:00:00Z', autoMergeEnabled: true }));
-
-    const order = store.listQueued().map((row) => row.number);
-    expect(order).toEqual([3, 2, 1]);
+  it('lists candidates oldest first, unranked', () => {
+    store.upsertPR(pr({ number: 1, createdAt: '2026-01-02T00:00:00Z', autoMergeEnabled: true }));
+    store.upsertPR(pr({ number: 2, createdAt: '2026-01-01T00:00:00Z' }));
+    expect(store.listQueued().map((row) => row.number)).toEqual([2, 1]);
   });
 
-  it('prioritizes approved+auto-merge, then auto-merge only, then approved only, then neither, oldest first within each tier', () => {
-    store.upsertPR(pr({ number: 1, createdAt: '2026-01-01T00:00:00Z', autoMergeEnabled: false, approved: false }));
-    store.upsertPR(pr({ number: 2, createdAt: '2026-01-02T00:00:00Z', autoMergeEnabled: false, approved: true }));
-    store.upsertPR(pr({ number: 3, createdAt: '2026-01-03T00:00:00Z', autoMergeEnabled: true, approved: false }));
-    store.upsertPR(pr({ number: 4, createdAt: '2026-01-04T00:00:00Z', autoMergeEnabled: true, approved: true }));
-    store.upsertPR(pr({ number: 5, createdAt: '2026-01-05T00:00:00Z', autoMergeEnabled: false, approved: true }));
-    store.upsertPR(pr({ number: 6, createdAt: '2026-01-06T00:00:00Z', autoMergeEnabled: true, approved: false }));
-
-    const order = store.listQueued().map((row) => row.number);
-    expect(order).toEqual([4, 3, 6, 2, 5, 1]);
+  it('excludes unapproved PRs from listQueued', () => {
+    store.upsertPR(pr({ number: 1, approved: false, autoMergeEnabled: true, ciStatus: 'passing' }));
+    expect(store.listQueued()).toHaveLength(0);
   });
 
   it('excludes draft PRs from listQueued', () => {
@@ -69,16 +59,6 @@ describe('Store', () => {
   it('excludes PRs with failing CI from listQueued', () => {
     store.upsertPR(pr({ number: 1, ciStatus: 'failing' }));
     expect(store.listQueued()).toHaveLength(0);
-  });
-
-  it('prioritizes passing CI ahead of pending CI regardless of approval tier', () => {
-    store.upsertPR(
-      pr({ number: 1, createdAt: '2026-01-01T00:00:00Z', autoMergeEnabled: true, approved: true, ciStatus: 'pending' })
-    );
-    store.upsertPR(pr({ number: 2, createdAt: '2026-01-02T00:00:00Z', ciStatus: 'passing' }));
-
-    const order = store.listQueued().map((row) => row.number);
-    expect(order).toEqual([2, 1]);
   });
 
   it('excludes conflicted PRs from listQueued', () => {
@@ -118,10 +98,22 @@ describe('Store', () => {
     expect(store.listQueued()).toHaveLength(1);
   });
 
-  it('tracks last processed base sha, defaulting to null', () => {
-    expect(store.getLastProcessedBaseSha()).toBeNull();
-    store.setLastProcessedBaseSha('abc123');
-    expect(store.getLastProcessedBaseSha()).toBe('abc123');
+  it('excludes stale PRs until the head sha changes', () => {
+    store.upsertPR(pr({ number: 1, headSha: 'sha1' }));
+    store.setStatus(1, 'stale');
+    store.upsertPR(pr({ number: 1, headSha: 'sha1' }));
+    expect(store.listQueued()).toHaveLength(0);
+    store.upsertPR(pr({ number: 1, headSha: 'sha2' }));
+    expect(store.listQueued().map((row) => row.number)).toEqual([1]);
+  });
+
+  it('stores and clears the tracked PR, defaulting to null', () => {
+    expect(store.getTracking()).toBeNull();
+    const tracking = { number: 7, since: '2026-01-01T00:00:00.000Z', baseSha: 'abc', ciPassed: true };
+    store.setTracking(tracking);
+    expect(store.getTracking()).toEqual(tracking);
+    store.clearTracking();
+    expect(store.getTracking()).toBeNull();
   });
 
   it('migrates an existing pr_queue table that predates the approved column', () => {
@@ -156,9 +148,8 @@ describe('Store', () => {
 
       const migratedStore = createStore(dbPath, 'main');
       const queued = migratedStore.listQueued();
-      expect(queued).toHaveLength(1);
-      expect(queued[0].approved).toBe(false);
-      expect(queued[0].ciStatus).toBe('pending');
+      expect(queued).toHaveLength(0); // pre-migration rows default to unapproved
+      expect(migratedStore.getTracking()).toBeNull();
 
       migratedStore.upsertPR(pr({ number: 2, approved: true, ciStatus: 'passing' }));
       const afterUpsert = migratedStore.listQueued().find((row) => row.number === 2);
